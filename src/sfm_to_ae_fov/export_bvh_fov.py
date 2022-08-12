@@ -33,7 +33,7 @@ def WriteHeader(file, frames, frameTime):
 	file.write("ROOT MdtCam\n")
 	file.write("{\n")
 	file.write("\tOFFSET 0.00 0.00 0.00\n")
-	file.write("\tCHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation\n")
+	file.write("\tCHANNELS 1 Xposition(FOV) \n")
 	file.write("\tEnd Site\n")
 	file.write("\t{\n")
 	file.write("\t\tOFFSET 0.00 0.00 -1.00\n")
@@ -56,62 +56,58 @@ def WriteFile(fileName, scale):
 		SetError("Selected animation set does not have transform DAG node.")
 		return False
 	
-	curFrame = 0
 	fps = sfmApp.GetFramesPerSecond()
 	frameTime = fps
 	if not 0 == frameTime:
 		frameTime = 1.0/float(frameTime)
 	frameCount = shot.GetDuration().CurrentFrame(vs.DmeFramerate_t(fps))
 	
-	file = open(fileName, 'wb')
+	file = open(fileName)
 	if not file:
 		SetError('Could not open file '+fileName+' for writing')
 		return False
 
 	oldFrame = sfm.GetCurrentFrame()
 	try:
-		WriteHeader(file, frameCount, frameTime)
+
+		curFrame = 0
+		is_data_row = False
+		replacement = ""
+		for line in file:
+			line = line.strip()
+			if "CHANNELS 6" in line:
+				changes = line.replace("6", "7") + " Fov"
+			elif is_data_row:
+				sfm.SetCurrentFrame(curFrame)
+				X = sfm.GetPosition("transform", space="RefObject")[0]
+				curFrame += 1
+				changes = line + " " + FloatToBvhString(X)
+			else:
+				changes = line
+			if "Frame Time" in line:
+				is_data_row = True
+			replacement += changes + "\n"
+
+		file.close()
+
+		file = open(fileName, "w")
+		file.write(replacement)
 		
-		while curFrame<frameCount:
-			sfm.SetCurrentFrame(curFrame)
 			
-			loc = sfm.GetPosition("transform", space="World")
-			rot = sfm.GetRotation("transform", space="World")
-			
-			X = -loc[1] *scale
-			Y =  loc[2] *scale
-			Z = -loc[0] *scale
-			
-			ZR = -rot[0] #*RAD2DEG
-			XR = -rot[1] #*RAD2DEG
-			YR =  rot[2] #*RAD2DEG
-				
-			ZR = LimDeg(ZR)
-			XR = LimDeg(XR)
-			YR = LimDeg(YR)
-			
-			S = "" +FloatToBvhString(X) +" " +FloatToBvhString(Y) +" " +FloatToBvhString(Z) +" " +FloatToBvhString(ZR) +" " +FloatToBvhString(XR) +" " +FloatToBvhString(YR) + "\n"
-			file.write(S)
-			
-			curFrame += 1
 				
 	finally:
 		file.close()
 		sfm.SetCurrentFrame(oldFrame)
 	
 	if not curFrame == frameCount:
-		SetError("Could not write all frames.")
+		SetError("Could not write all frames." + str(curFrame) + " " + str(frameCount))
 		return False
 	
 	return True
 
 
 def ExportCamera():
-	#value, ok = QtGui.QInputDialog.getDouble(None, "Enter export FPS", "Frames Per Second", 60, 0.001, 1000000, 3)
-	#if not ok:
-	#	return
-	
-	fileName, _ = QtGui.QFileDialog.getSaveFileName(None, "Save HLAE BVH File",  "", "HLAE BVH (*.bvh)")
+	fileName, _ = QtGui.QFileDialog.getSaveFileName(None, "Select existing BVH file with pos and rot.",  "", "HLAE BVH (*.bvh)")
 	if not 0 < len(fileName):
 		return
 	
